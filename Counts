@@ -1,0 +1,17 @@
+#!/bin/bash
+
+#SBATCH --job-name=subread # you can give your job a name
+#SBATCH --ntasks=5 # the number of processors or tasks
+#SBATCH --account=itcga # our account
+#SBATCH --reservation=2025_JUNE_ITCGA_WORKSHOP # this gives us special access during the workshop
+#SBATCH --time=2:00:00 # the maximum time for the job hrs:min:secs
+#SBATCH --mem=16gb # the amount of RAM
+#SBATCH --partition=itcga # the specific server in chimera we are using
+#SBATCH --error=%x-%A.err   # a filename to save error messages into
+#SBATCH --output=%x-%A.out  # a filename to save any printed output into
+
+# Load modules
+
+module load subread-2.0.2-gcc-10.2.0
+featureCounts -a /itcgastorage/share_home/s.sajjadi001/1_project/data/genome/Homo_sapiens.GRCh38.111.gtf -o results/counts/counts.txt \
+        -T 5 -p -B -C results/bam/*.bam

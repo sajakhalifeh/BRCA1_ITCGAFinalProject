@@ -1,0 +1,49 @@
+#!/bin/bash
+
+#SBATCH --job-name=autoAligner # you can give your job a name
+#SBATCH --ntasks=15 # the number of processors or tasks
+#SBATCH --account=itcga # our account
+#SBATCH --reservation=2025_JUNE_ITCGA_WORKSHOP # this gives us special access during the workshop
+#SBATCH --time=6:00:00 # the maximum time for the job hrs:min:secs
+#SBATCH --mem=32gb # the amount of RAM
+#SBATCH --partition=itcga # the specific server in chimera we are using
+#SBATCH --error=%x-%A.err   # a filename to save error messages into
+#SBATCH --output=%x-%A.out  # a filename to save any printed output into
+
+# Load modules
+module load gcc-10.2.0-gcc-9.3.0-f3oaqv7
+module load python-3.8.12-gcc-10.2.0-oe4tgov
+module load hisat2-2.1.0-gcc-9.3.0-u7zbyow
+module load samtools-1.10-gcc-9.3.0-flukja5
+
+# Write a for loop for each trimmed forward read file
+for file in ~/brca1/data/untrimmed_fastq/*.fastq;
+do
+
+# Set variables
+ref=/itcgastorage/data01/itcga_workshops/aug2024_genomics/Genome/hg38/hg38
+resdir=~/brca1/results
+
+base=$(basename $file .fastq)
+
+echo $base
+
+# Run alignment
+hisat2 -p 15 -x $ref -U ~/brca1/data/untrimmed_fastq/${base}.fastq -S ${resdir}/sam/${base}.sam
+echo "alignment done"
+
+# Convert sam to bam
+samtools view -@15 -S -b ${resdir}/sam/${base}.sam > ${resdir}/bam/${base}.bam
+echo "conversion done"
+
+# Sort bam file
+samtools sort -@15 -o ${resdir}/bam/${base}.bam  ${resdir}/bam/${base}_sorted.bam
+echo "sorting done"
+
+# Calculate alignment stats
+samtools flagstat -@15 ${resdir}/bam/${base}_sorted.bam
+echo "stats done"
+
+# Index alignment file
+samtools index -@15 ${resdir}/bam/${base}_sorted.bam
+done

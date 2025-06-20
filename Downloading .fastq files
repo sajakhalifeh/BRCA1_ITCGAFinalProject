@@ -1,0 +1,18 @@
+#!/bin/bash
+
+#SBATCH --job-name=dump # you can give your job a name
+#SBATCH --ntasks=10 # the number of processors or tasks
+#SBATCH --account=itcga # our account
+#SBATCH --reservation=2025_JUNE_ITCGA_WORKSHOP # this gives us special access during the workshop
+#SBATCH --time=4:00:00 # the maximum time for the job hrs:min:secs
+#SBATCH --mem=8gb # the amount of RAM
+#SBATCH --partition=itcga # the specific server in chimera we are using
+#SBATCH --error=%x-%A.err   # a filename to save error messages into
+#SBATCH --output=%x-%A.out  # a filename to save any printed output into
+
+while read -r p;
+do
+
+./data/sratoolkit.3.2.1-ubuntu64/bin/fastq-dump --split-files "$p"
+
+done <meta.txt

@@ -1,0 +1,243 @@
+# Load necessary libraries
+
+library(tidyverse)
+
+library(ggplot2)
+
+library(ggrepel)
+
+library(optparse)
+
+library(edgeR)
+
+library(openxlsx)
+
+ 
+
+ 
+
+ 
+
+input.dir <- "" ## set this to the directory including all count files (downloaded from Chimera)
+
+# List all count files in the directory
+
+count_files <- list.files(path =input.dir, pattern = "_counts.txt$", full.names = TRUE)
+
+ 
+
+L <- lapply(count_files, function(file){
+
+  data <- read.table(file, header = TRUE, stringsAsFactors = FALSE)
+
+  count <- data.frame(GeneID = data[,1], count = as.numeric(data[,7]))
+
+  count$sample <- strsplit(basename(file), split = '_')[[1]][1]
+
+  return(count)
+
+})
+
+ 
+
+count.matrix <- bind_rows(L)
+
+count.matrix <- count.matrix %>% group_by(GeneID, sample) %>% summarise(count = max(count))
+
+ 
+
+count.matrix.wide <- count.matrix %>% pivot_wider(names_from = sample, values_from = count)
+
+ 
+
+# Save the count matrix to the specified output file
+
+output.file <- "" ## set this as appropriate
+
+write.xlsx(count.matrix.wide, file = output.file)
+
+ 
+
+ 
+
+ 
+
+## Compute differentially expressed genes using edgeR
+
+getDiffGenesEdgeR <- function(RNAseq.c1, RNAseq.c2, cutoff.pval = 0.01, cutoff.fc = 1, rm.low = T){
+
+  Expr.c1 <- data.frame(RNAseq.c1[,2:ncol(RNAseq.c1)])
+
+  Expr.c2 <- data.frame(RNAseq.c2[,2:ncol(RNAseq.c2)])
+
+  Expr.c1.c2 <- cbind(Expr.c1, Expr.c2)
+
+  rownames(Expr.c1.c2) <- RNAseq.c1[,1]
+
+ 
+
+  ## Remove rows with low counts
+
+  if(rm.low){
+
+    CPM  <- cpm(Expr.c1.c2)
+
+    keep <-  rowSums(CPM > 1) >= 2
+
+    #keep <-  rowSums(CPM > 10) >= 4
+
+    Expr.c1.c2 <- Expr.c1.c2[keep, ]
+
+    print(paste('genes kept:', length(which(keep == T))))
+
+    gene.id <- RNAseq.c1[keep, 1]
+
+   
+
+    ##min.val = quantile(rowSums(Expr.c1.c2), probs=0.2)
+
+    ##low.ind = which(rowSums(Expr.c1.c2) <= min.val)
+
+    ##print(paste('min.val:', min.val))
+
+    ##print(paste('genes removed:', length(low.ind)))
+
+    ##Expr.c1.c2 = Expr.c1.c2[-low.ind, ]
+
+    ##gene.id <- RNAseq.c1[-low.ind, 1]
+
+    ## gene.names = RNAseq.c1[-low.ind, 1:2]
+
+    ##
+
+  }else{
+
+    gene.id <- RNAseq.c1[, 1]
+
+  }
+
+ 
+
+  Group  <- factor(c(rep("0", ncol(Expr.c1)), rep("1", ncol(Expr.c2))))
+
+  design <- model.matrix(~Group)
+
+ 
+
+  dge <- DGEList(counts=Expr.c1.c2, group = Group, genes = gene.id)
+
+  dge <- calcNormFactors(dge)
+
+  dge <- estimateGLMCommonDisp(dge, design)
+
+  dge <- estimateGLMTrendedDisp(dge, design)
+
+  dge <- estimateGLMTagwiseDisp(dge, design)
+
+  fit <- glmFit(dge, design)
+
+  ##fit <- glmLRT(fit, contrast=c(-1, 1))
+
+  fit <- glmLRT(fit, coef = 2)
+
+  tab <- topTags(fit,n=Inf,adjust.method="BH")$table
+
+  colnames(tab)[1] = 'Ensemble'
+
+  tab <- na.omit(tab)
+
+  tab <- tab[order(tab$FDR, abs(tab$logFC), decreasing = c(F, T)), ]
+
+  tab <- tab[!duplicated(tab$Ensemble),]
+
+  #colnames(tab)[3] <- 'adj.P.Val'
+
+ 
+
+  #print(paste('EgdeR number of diff expr genes:', nrow(tab)))
+
+  if(nrow(tab) == 0){
+
+    tab = data.frame(Ensemble = NA, entrez = NA, genes = NA, FDR = NA, logFC = NA)
+
+  }
+
+ 
+
+  return(tab)
+
+}
+
+ 
+
+ 
+
+## Perform DEG analysis
+
+gene.counts <- count.matrix.wide
+
+ 
+
+ 
+
+# Perform differential expression analysis
+
+RNAseq.c1 <- gene.counts[, c(1,which(grepl('V', colnames(gene.counts))))]
+
+RNAseq.c2 <- gene.counts[, c(1,which(grepl('T', colnames(gene.counts))))]
+
+ 
+
+tab <- getDiffGenesEdgeR(RNAseq.c1, RNAseq.c2, cutoff.pval = 0.05, cutoff.fc = log2(1.5), rm.low = TRUE)
+
+ 
+
+ 
+
+tab.sig <- tab %>% dplyr::filter(PValue <= 0.05 & abs(logFC) > log2(1.5))
+
+ 
+
+volcano_plot <- ggplot(tab.sig, aes(x = logFC, y = -log10(PValue), color = significance)) +
+
+  geom_point(alpha = 0.5) +
+
+  scale_color_manual(values = c("Upregulated" = "red", "Downregulated" = "blue", "Not significant" = "grey")) +
+
+  geom_text_repel(data = top_genes, aes(label = Ensemble), size = 3, fontface = 'bold') +
+
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed") +
+
+  geom_vline(xintercept = c(log2(1.5), -log2(1.5)), linetype = "dashed") +
+
+  theme_bw() +
+
+  theme(legend.position = 'None',
+
+        axis.title = element_text(size = 14, face = "bold"),
+
+        axis.text = element_text(size = 12, face = "bold"),
+
+        legend.text = element_text(size = 12, face = "bold"),
+
+        legend.title = element_blank()
+
+  ) +
+
+  labs(x = "Log2 Fold Change", y = "-Log10 P-value")
+
+ 
+
+Save the volcano plot
+
+volcano_output <- "" Path to the output.pdf figure.
+
+ggsave(volcano_output, plot = volcano_plot, width = 8, height = 8, units = "in")
+
+ 
+
+ 
+
+degs_output <- "" # path to DEG output file. This is what you use for gProfiler.
+
+write.xlsx(tab.sig, degs_output)
